@@ -1,0 +1,926 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Market Making Engine — Avellaneda-Stoikov + RL</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600&family=Sora:wght@300;400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:       #f5f4f0;
+  --bg1:      #ffffff;
+  --bg2:      #fafaf8;
+  --bg3:      #f0efe9;
+  --border:   #e2e0d8;
+  --border2:  #cccac0;
+  --text:     #1a1a1a;
+  --text2:    #4a4a4a;
+  --text3:    #888880;
+  --amber:    #c47d0e;
+  --amber-bg: #fff8e6;
+  --green:    #1a7a4a;
+  --green-bg: #edfaf3;
+  --red:      #c0392b;
+  --red-bg:   #fff0ee;
+  --blue:     #1a5ca0;
+  --blue-bg:  #eef4ff;
+  --teal:     #1a7070;
+  --teal-bg:  #edfafa;
+  --purple:   #6030b0;
+  --purple-bg:#f3eeff;
+  --mono:     'JetBrains Mono', monospace;
+  --sans:     'Sora', sans-serif;
+}
+html{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:15px;line-height:1.65}
+body{min-height:100vh}
+::-webkit-scrollbar{width:7px;height:7px}
+::-webkit-scrollbar-track{background:var(--bg3)}
+::-webkit-scrollbar-thumb{background:var(--border2);border-radius:4px}
+
+/* ── Layout ── */
+.site{display:grid;grid-template-rows:auto 1fr auto;min-height:100vh}
+.topbar{background:var(--bg1);border-bottom:1.5px solid var(--border);padding:0 28px;height:58px;display:flex;align-items:center;justify-content:space-between}
+.logo{font-family:var(--mono);font-size:13px;font-weight:600;color:var(--text);letter-spacing:.03em;display:flex;align-items:center;gap:10px}
+.logo-tag{background:var(--amber-bg);color:var(--amber);border:1px solid rgba(196,125,14,.2);padding:3px 9px;border-radius:4px;font-size:11px;letter-spacing:.06em}
+.topbar-right{display:flex;align-items:center;gap:14px}
+.stat-chip{display:flex;flex-direction:column;align-items:flex-end;min-width:80px}
+.stat-chip-label{font-size:10px;color:var(--text3);font-family:var(--mono);text-transform:uppercase;letter-spacing:.06em}
+.stat-chip-val{font-family:var(--mono);font-size:14px;font-weight:600}
+.sep{width:1px;height:32px;background:var(--border)}
+.dot-run{width:8px;height:8px;border-radius:50%;background:#aaa;flex-shrink:0}
+.dot-run.on{background:var(--green);box-shadow:0 0 0 3px rgba(26,122,74,.15);animation:blip 1.3s infinite}
+@keyframes blip{0%,100%{opacity:1}50%{opacity:.3}}
+.run-label{font-size:12px;font-family:var(--mono);color:var(--text2)}
+
+.main{display:grid;grid-template-columns:320px 1fr;height:calc(100vh - 58px - 38px);overflow:hidden}
+.sidebar{border-right:1.5px solid var(--border);overflow-y:auto;background:var(--bg1)}
+.content{overflow-y:auto;padding:18px;display:flex;flex-direction:column;gap:14px;background:var(--bg)}
+.footer{background:var(--bg1);border-top:1.5px solid var(--border);padding:0 28px;height:38px;display:flex;align-items:center;justify-content:space-between}
+.footer-l{font-family:var(--mono);font-size:11px;color:var(--text3)}
+.footer-r{display:flex;gap:18px}
+.footer-r a{font-family:var(--mono);font-size:11px;color:var(--text3);text-decoration:none;border-bottom:1px solid var(--border)}
+.footer-r a:hover{color:var(--blue);border-color:var(--blue)}
+
+/* ── Sidebar panels ── */
+.panel{border-bottom:1px solid var(--border)}
+.ph{padding:13px 16px;display:flex;align-items:center;justify-content:space-between;cursor:pointer;user-select:none;transition:background .15s}
+.ph:hover{background:var(--bg3)}
+.ph-title{font-family:var(--mono);font-size:11px;font-weight:600;color:var(--text2);letter-spacing:.06em;text-transform:uppercase}
+.ph-arrow{font-size:10px;color:var(--text3);transition:transform .2s}
+.ph-arrow.open{transform:rotate(90deg)}
+.pb{padding:4px 16px 14px}
+
+/* ── Controls ── */
+.ctrl-block{padding:14px 16px;border-bottom:1px solid var(--border)}
+.ctrl-label{font-family:var(--mono);font-size:10px;color:var(--text3);letter-spacing:.08em;text-transform:uppercase;margin-bottom:12px}
+.ctrl-row{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+.ctrl-name{font-size:13px;color:var(--text2);min-width:90px}
+.ctrl-val{font-family:var(--mono);font-size:13px;font-weight:500;color:var(--amber);min-width:40px;text-align:right}
+input[type=range]{flex:1;-webkit-appearance:none;height:4px;background:var(--border);border-radius:2px;outline:none;cursor:pointer}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;border-radius:50%;background:var(--amber);border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.2);cursor:pointer}
+input[type=range]:hover::-webkit-slider-thumb{background:#d9900f}
+.btn-row{display:flex;gap:8px;padding:12px 16px;border-bottom:1px solid var(--border)}
+.btn{font-family:var(--mono);font-size:12px;padding:9px 18px;border-radius:6px;cursor:pointer;border:1.5px solid var(--border2);background:var(--bg1);color:var(--text);font-weight:500;letter-spacing:.03em;transition:all .15s}
+.btn:hover{transform:translateY(-1px);box-shadow:0 2px 8px rgba(0,0,0,.08)}
+.btn:active{transform:scale(.97)}
+.btn-run{background:var(--green-bg);border-color:rgba(26,122,74,.3);color:var(--green)}
+.btn-run:hover{background:#dcf5e9;border-color:var(--green)}
+.btn-reset{background:var(--red-bg);border-color:rgba(192,57,43,.2);color:var(--red)}
+.btn-reset:hover{background:#ffe4e0;border-color:var(--red)}
+
+/* ── Cards ── */
+.card{background:var(--bg1);border:1.5px solid var(--border);border-radius:10px;padding:14px 16px}
+.card-sm{background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:10px 12px}
+.card-title{font-family:var(--mono);font-size:10px;font-weight:600;color:var(--text3);letter-spacing:.08em;text-transform:uppercase;margin-bottom:8px;display:flex;align-items:center;gap:6px}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px}
+.row4{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
+
+/* ── Metrics ── */
+.metric-xl{font-family:var(--mono);font-size:28px;font-weight:600;line-height:1.1;letter-spacing:-.01em}
+.metric-lg{font-family:var(--mono);font-size:21px;font-weight:500;line-height:1.2}
+.metric-md{font-family:var(--mono);font-size:16px;font-weight:500}
+.metric-sm{font-family:var(--mono);font-size:13px;font-weight:500}
+.metric-hint{font-size:12px;color:var(--text3);margin-top:4px}
+.c-green{color:var(--green)}.c-red{color:var(--red)}.c-amber{color:var(--amber)}.c-blue{color:var(--blue)}.c-teal{color:var(--teal)}.c-dim{color:var(--text3)}.c-purple{color:var(--purple)}
+
+/* ── LOB ── */
+.lob-row{display:flex;align-items:center;gap:8px;padding:4px 0;font-family:var(--mono);font-size:12px;border-bottom:1px solid var(--border)}
+.lob-price{width:75px;text-align:right;font-weight:500}
+.lob-vol{width:52px;text-align:right;color:var(--text3);font-size:11px}
+.lob-bar-wrap{flex:1;height:6px;background:var(--bg3);border-radius:3px;overflow:hidden}
+.lob-bar{height:100%;border-radius:3px;transition:width .25s}
+.mid-band{display:flex;justify-content:space-between;align-items:center;padding:6px 0;font-family:var(--mono);font-size:12px;border-top:2px solid var(--border2);border-bottom:2px solid var(--border2);margin:3px 0;background:var(--bg3);border-radius:4px;padding:5px 8px}
+
+/* ── Decomp ── */
+.decomp-row{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+.decomp-lbl{font-size:12px;font-family:var(--mono);color:var(--text2);width:130px;flex-shrink:0}
+.decomp-track{flex:1;height:8px;background:var(--bg3);border-radius:4px;overflow:hidden}
+.decomp-fill{height:100%;border-radius:4px;transition:width .4s}
+.decomp-num{font-family:var(--mono);font-size:12px;font-weight:500;width:78px;text-align:right;flex-shrink:0}
+
+/* ── VPIN ── */
+.vpin-outer{height:14px;background:var(--bg3);border-radius:7px;overflow:hidden;margin:8px 0;position:relative}
+.vpin-fill{height:100%;border-radius:7px;transition:width .5s,background .4s}
+.vpin-markers{display:flex;justify-content:space-between;font-family:var(--mono);font-size:10px;color:var(--text3);margin-top:3px}
+
+/* ── RL actions ── */
+.rl-row{display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:6px;margin-bottom:4px;border:1.5px solid transparent;transition:all .2s;font-family:var(--mono);font-size:12px}
+.rl-row.active{background:var(--amber-bg);border-color:rgba(196,125,14,.25)}
+.rl-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0}
+.rl-name{width:58px;color:var(--text2);font-weight:500}
+.rl-track{flex:1;height:5px;background:var(--bg3);border-radius:3px;overflow:hidden}
+.rl-fill{height:100%;border-radius:3px;transition:width .4s}
+.rl-pct{width:40px;text-align:right;color:var(--text3);font-size:11px}
+
+/* ── Quote cards ── */
+.quote-card{border-radius:6px;padding:9px 12px;margin:4px 0;font-family:var(--mono);font-size:13px;font-weight:500}
+.q-bid{background:var(--green-bg);border:1.5px solid rgba(26,122,74,.25);color:var(--green)}
+.q-ask{background:var(--red-bg);border:1.5px solid rgba(192,57,43,.2);color:var(--red)}
+.q-skip{background:var(--bg3);border:1.5px solid var(--border);color:var(--text3)}
+
+/* ── State pills ── */
+.state-pill{display:inline-flex;align-items:center;gap:5px;padding:4px 12px;border-radius:4px;font-family:var(--mono);font-size:12px;font-weight:600;letter-spacing:.03em}
+.sp-normal {background:var(--green-bg);color:var(--green);border:1px solid rgba(26,122,74,.2)}
+.sp-skewed {background:var(--amber-bg);color:var(--amber);border:1px solid rgba(196,125,14,.2)}
+.sp-one    {background:var(--red-bg);  color:var(--red);  border:1px solid rgba(192,57,43,.2)}
+.sp-halted {background:#ffe0e0;color:#a00000;border:1px solid rgba(160,0,0,.3)}
+
+/* ── Explain boxes ── */
+.explain{background:var(--blue-bg);border:1px solid rgba(26,92,160,.15);border-radius:7px;padding:11px 13px;font-size:13px;color:var(--text2);line-height:1.65;margin-bottom:10px}
+.explain b{color:var(--blue);font-weight:600}
+.explain .formula{font-family:var(--mono);font-size:12px;background:var(--bg1);border:1px solid var(--border);padding:6px 10px;border-radius:5px;margin-top:8px;color:var(--text)}
+
+/* ── Tooltip ── */
+.tip{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:var(--bg3);border:1px solid var(--border2);font-size:10px;color:var(--text3);cursor:help;position:relative;vertical-align:middle;margin-left:4px;font-family:var(--mono)}
+.tip:hover::after{content:attr(data-tip);position:absolute;left:22px;top:50%;transform:translateY(-50%);background:var(--text);color:var(--bg1);border-radius:7px;padding:9px 13px;font-size:12px;font-family:var(--sans);width:230px;z-index:9999;white-space:normal;line-height:1.55;pointer-events:none;box-shadow:0 4px 20px rgba(0,0,0,.18)}
+
+/* ── Sweep table ── */
+.sweep-table{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:12px}
+.sweep-table th{color:var(--text3);padding:5px 8px;text-align:right;font-weight:500;font-size:10px;letter-spacing:.06em;border-bottom:2px solid var(--border);text-transform:uppercase}
+.sweep-table th:first-child{text-align:left}
+.sweep-table td{padding:6px 8px;text-align:right;border-bottom:1px solid var(--border);color:var(--text2)}
+.sweep-table td:first-child{text-align:left;font-weight:600}
+.sweep-table tr.best td{color:var(--green);background:var(--green-bg)}
+.sweep-table tr.best td:first-child{color:var(--green)}
+.sweep-table tr:hover td:not(.best td){background:var(--bg3)}
+
+/* ── Log ── */
+.log-line{font-family:var(--mono);font-size:12px;color:var(--text3);padding:3px 0;border-bottom:1px solid var(--border);line-height:1.5}
+.lf{color:var(--green)}.lh{color:var(--red)}.li{color:var(--teal)}.lw{color:var(--amber)}
+
+/* ── Regime ── */
+.regime-row{display:flex;gap:6px}
+.regime-pill{font-family:var(--mono);font-size:11px;font-weight:600;padding:4px 10px;border-radius:4px;opacity:.25;transition:opacity .3s,transform .2s;letter-spacing:.04em}
+.regime-pill.active{opacity:1;transform:scale(1.05)}
+.rp-LOW   {background:var(--blue-bg);color:var(--blue);border:1px solid rgba(26,92,160,.2)}
+.rp-NORMAL{background:var(--green-bg);color:var(--green);border:1px solid rgba(26,122,74,.2)}
+.rp-HIGH  {background:var(--amber-bg);color:var(--amber);border:1px solid rgba(196,125,14,.2)}
+.rp-SPIKE {background:var(--red-bg);color:var(--red);border:1px solid rgba(192,57,43,.2)}
+
+/* ── Section title ── */
+.section-title{font-family:var(--mono);font-size:10px;font-weight:600;color:var(--text3);letter-spacing:.1em;text-transform:uppercase;padding:10px 16px 4px;border-bottom:1px solid var(--border)}
+
+/* ── Chart grid overlay ── */
+.chart-wrap{position:relative;width:100%}
+
+/* ── Formula display ── */
+.formula-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
+.formula-cell{background:var(--bg2);border:1.5px solid var(--border);border-radius:8px;padding:12px;text-align:center}
+.formula-cell .val{font-family:var(--mono);font-size:18px;font-weight:600;margin:4px 0}
+.formula-cell .math{font-family:var(--mono);font-size:10px;color:var(--text3);margin-top:6px;background:var(--bg3);padding:4px 6px;border-radius:4px}
+.formula-cell .label{font-size:11px;color:var(--text3);font-family:var(--mono);text-transform:uppercase;letter-spacing:.06em}
+
+/* ── Spread visualiser ── */
+.spread-vis{display:flex;align-items:center;height:44px;border-radius:6px;overflow:hidden;margin:8px 0;position:relative;background:var(--bg3);border:1px solid var(--border)}
+.sv-bid{background:rgba(26,122,74,.15);display:flex;align-items:center;justify-content:flex-end;padding:0 8px;transition:width .4s;height:100%;font-family:var(--mono);font-size:12px;color:var(--green);font-weight:500}
+.sv-spread{background:rgba(196,125,14,.1);border-left:2px solid rgba(196,125,14,.4);border-right:2px solid rgba(196,125,14,.4);display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:11px;color:var(--amber);font-weight:600;transition:width .4s;height:100%;flex-shrink:0}
+.sv-ask{background:rgba(192,57,43,.12);display:flex;align-items:center;padding:0 8px;transition:width .4s;height:100%;font-family:var(--mono);font-size:12px;color:var(--red);font-weight:500;flex:1}
+
+/* ── Inventory bar ── */
+.inv-bar-wrap{height:20px;background:var(--bg3);border-radius:10px;overflow:hidden;position:relative;border:1px solid var(--border);margin:8px 0}
+.inv-bar{height:100%;border-radius:10px;transition:width .4s,background .4s,margin-left .4s;position:absolute;top:0}
+.inv-center{position:absolute;left:50%;top:0;width:2px;height:100%;background:var(--border2)}
+.inv-label{position:absolute;top:0;left:50%;transform:translateX(-50%);height:100%;display:flex;align-items:center;font-family:var(--mono);font-size:11px;font-weight:600;color:var(--text);pointer-events:none}
+
+/* ── Tabs ── */
+.tabs{display:flex;gap:0;border-bottom:1.5px solid var(--border);margin-bottom:14px}
+.tab{font-family:var(--mono);font-size:11px;font-weight:500;color:var(--text3);padding:8px 16px;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1.5px;letter-spacing:.04em;text-transform:uppercase;transition:all .15s}
+.tab:hover{color:var(--text2)}
+.tab.active{color:var(--blue);border-bottom-color:var(--blue)}
+.tab-content{display:none}.tab-content.active{display:block}
+
+@media(max-width:960px){.main{grid-template-columns:1fr;height:auto}.sidebar{height:auto;border-right:none;border-bottom:1.5px solid var(--border)}.row4{grid-template-columns:1fr 1fr}}
+@media(max-width:580px){.row4,.row3,.row2{grid-template-columns:1fr}.topbar{padding:0 14px}}
+</style>
+</head>
+<body>
+<div class="site">
+
+<!-- TOPBAR -->
+<header class="topbar">
+  <div class="logo">
+    <span class="logo-tag">NIFTY_FUT</span>
+    Market Making Engine &mdash; Avellaneda-Stoikov + RL
+  </div>
+  <div class="topbar-right">
+    <div class="stat-chip">
+      <span class="stat-chip-label">Mid Price</span>
+      <span class="stat-chip-val" id="h-mid" style="color:var(--blue)">22,500.00</span>
+    </div>
+    <div class="sep"></div>
+    <div class="stat-chip">
+      <span class="stat-chip-label">P&amp;L</span>
+      <span class="stat-chip-val" id="h-pnl" style="color:var(--text2)">₹0</span>
+    </div>
+    <div class="sep"></div>
+    <div class="stat-chip">
+      <span class="stat-chip-label">Gamma γ</span>
+      <span class="stat-chip-val" id="h-gamma" style="color:var(--amber)">0.20</span>
+    </div>
+    <div class="sep"></div>
+    <span class="dot-run" id="status-dot"></span>
+    <span class="run-label" id="status-label">idle</span>
+  </div>
+</header>
+
+<div class="main">
+<!-- SIDEBAR -->
+<aside class="sidebar">
+
+  <div class="btn-row">
+    <button class="btn btn-run" id="btn-run">▶ Run Simulation</button>
+    <button class="btn btn-reset" id="btn-reset">■ Reset</button>
+  </div>
+
+  <div class="ctrl-block">
+    <div class="ctrl-label">Controls</div>
+    <div class="ctrl-row">
+      <span class="ctrl-name">Risk aversion γ <span class="tip" data-tip="γ (gamma) = how wide your quotes are. Low = tight spread, lots of fills, more inventory risk. High = wide spread, fewer fills, safer. γ=0.20 was optimal in our tests.">?</span></span>
+      <input type="range" min="1" max="20" value="2" id="sl-gamma">
+      <span class="ctrl-val" id="vl-gamma">0.20</span>
+    </div>
+    <div class="ctrl-row">
+      <span class="ctrl-name">Sim speed <span class="tip" data-tip="Slow it down to watch individual fills and order book changes in real time.">?</span></span>
+      <input type="range" min="1" max="5" value="3" id="sl-speed">
+      <span class="ctrl-val" id="vl-speed">3×</span>
+    </div>
+    <div class="ctrl-row">
+      <span class="ctrl-name">Quote size <span class="tip" data-tip="How many contracts (lots) we quote on each side. Bigger = more P&L per fill but bigger inventory swings.">?</span></span>
+      <input type="range" min="1" max="20" value="10" id="sl-qty">
+      <span class="ctrl-val" id="vl-qty">10</span>
+    </div>
+  </div>
+
+  <!-- What is a market maker -->
+  <div class="panel">
+    <div class="ph" onclick="tog('pm1','pa1')">
+      <span class="ph-title">📖 What is a market maker?</span>
+      <span class="ph-arrow" id="pa1">▸</span>
+    </div>
+    <div class="pb" id="pm1" style="display:none">
+      <div class="explain">
+        Think of a <b>market maker</b> like a currency exchange booth at an airport. They always quote two prices: one to buy from you, one to sell to you. The gap between those two prices — called the <b>spread</b> — is their revenue.<br><br>
+        The danger: if they buy too much and prices fall, they're stuck holding losses. This is called <b>inventory risk</b>. Our engine solves this using a 2008 academic paper by Avellaneda &amp; Stoikov.
+      </div>
+    </div>
+  </div>
+
+  <!-- LOB -->
+  <div class="panel">
+    <div class="ph" onclick="tog('pm2','pa2')">
+      <span class="ph-title">📚 How the order book works</span>
+      <span class="ph-arrow" id="pa2">▸</span>
+    </div>
+    <div class="pb" id="pm2" style="display:none">
+      <div class="explain">
+        The <b>Limit Order Book (LOB)</b> is a live list of every pending buy and sell order, sorted by price.<br><br>
+        <b>Green rows (bids)</b> = people waiting to buy. <b>Red rows (asks)</b> = people waiting to sell. When a new order matches an existing one, a <b>trade fires</b> and both disappear from the book. We post our own quotes into this book.
+      </div>
+    </div>
+  </div>
+
+  <!-- A-S -->
+  <div class="panel">
+    <div class="ph" onclick="tog('pm3','pa3')">
+      <span class="ph-title">🧮 Avellaneda-Stoikov model</span>
+      <span class="ph-arrow" id="pa3">▸</span>
+    </div>
+    <div class="pb" id="pm3" style="display:none">
+      <div class="explain">
+        The A-S paper (2008) answered: <i>"Where exactly should I place my quotes?"</i><br><br>
+        <b>Reservation price r</b> = we shift our "fair value" away from mid depending on how much inventory we hold. Long positions → shade price down to attract sellers.<br><br>
+        <b>Optimal spread δ*</b> = two components. First: inventory risk (shrinks as session ends). Second: protection against informed traders (stays fixed).
+        <div class="formula">r = s - q·γ·σ²·(T-t)<br>δ* = γσ²(T-t) + (2/γ)·ln(1 + γ/κ)</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- RL -->
+  <div class="panel">
+    <div class="ph" onclick="tog('pm4','pa4')">
+      <span class="ph-title">🤖 What the RL agent learned</span>
+      <span class="ph-arrow" id="pa4">▸</span>
+    </div>
+    <div class="pb" id="pm4" style="display:none">
+      <div class="explain">
+        We trained a <b>PPO neural network</b> over 30 simulated sessions. It learns to answer: <i>"Should I tighten or widen my spread right now?"</i><br><br>
+        It sees 11 inputs: inventory, VPIN, imbalance, spread, volatility, time left, P&amp;L, drawdown, depth.<br><br>
+        <b>Result:</b> the agent chose γ×2.0 in 64.9% of ticks — it learned that being cautious about inventory beats chasing fills. Reward improved +1.94 over training.
+      </div>
+    </div>
+  </div>
+
+  <!-- VPIN -->
+  <div class="panel">
+    <div class="ph" onclick="tog('pm5','pa5')">
+      <span class="ph-title">☠️ VPIN — toxicity detector</span>
+      <span class="ph-arrow" id="pa5">▸</span>
+    </div>
+    <div class="pb" id="pm5" style="display:none">
+      <div class="explain">
+        <b>VPIN</b> detects whether <i>informed traders</i> (people who know something you don't) are active.<br><br>
+        If someone keeps hitting our bids and never touches our asks, they probably know the price is about to fall. VPIN tracks this imbalance. Above <b>0.65</b> → we stop quoting entirely. Better to earn nothing than get picked off by someone smarter.
+      </div>
+    </div>
+  </div>
+
+  <!-- Gamma sweep -->
+  <div class="panel">
+    <div class="ph" onclick="tog('pm6','pa6')">
+      <span class="ph-title">📊 Module 4 — gamma sweep results</span>
+      <span class="ph-arrow" id="pa6">▾</span>
+    </div>
+    <div class="pb" id="pm6">
+      <div class="explain" style="margin-bottom:10px">
+        We ran 6 different γ values on <b>identical market data</b>. γ=0.20 had the best risk-adjusted return (Sharpe 8.88). Try sliding gamma above and watch how quotes shift.
+      </div>
+      <table class="sweep-table">
+        <thead><tr><th>γ</th><th>Sharpe</th><th>P&amp;L</th><th>Fill%</th></tr></thead>
+        <tbody>
+          <tr><td>0.01</td><td>1.50</td><td>+₹218</td><td>4.7%</td></tr>
+          <tr><td>0.05</td><td>1.79</td><td>+₹218</td><td>7.0%</td></tr>
+          <tr class="best"><td>0.20 ★ best</td><td>8.88</td><td>+₹1,534</td><td>52.3%</td></tr>
+          <tr><td>0.50</td><td>2.12</td><td>+₹550</td><td>60.9%</td></tr>
+          <tr><td>1.00</td><td>-1.94</td><td>-₹851</td><td>74.2%</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+</aside>
+
+<!-- CONTENT -->
+<main class="content">
+
+  <!-- KPIs -->
+  <div class="row4">
+    <div class="card">
+      <div class="card-title">Mid Price <span class="tip" data-tip="The midpoint between the best bid and best ask. We treat this as the 'fair value' of NIFTY futures right now.">?</span></div>
+      <div class="metric-xl c-blue" id="m-mid">22,500.00</div>
+      <div class="metric-hint" id="m-mid-chg">change: —</div>
+    </div>
+    <div class="card">
+      <div class="card-title">Total P&amp;L <span class="tip" data-tip="Cash from filled trades + unrealised value of current inventory. Updates every tick.">?</span></div>
+      <div class="metric-xl" id="m-pnl" style="color:var(--text2)">₹0</div>
+      <div class="metric-hint" id="m-fills">fills: 0 &nbsp;|&nbsp; trips: 0</div>
+    </div>
+    <div class="card">
+      <div class="card-title">Inventory <span class="tip" data-tip="How many lots (contracts) we currently hold. + = we bought more than we sold. The risk system pushes this back toward zero.">?</span></div>
+      <div class="metric-xl" id="m-inv" style="color:var(--text2)">0</div>
+      <!-- Inventory bar -->
+      <div class="inv-bar-wrap" style="margin-top:8px">
+        <div class="inv-center"></div>
+        <div class="inv-bar" id="inv-bar" style="width:0%;left:50%;background:var(--green)"></div>
+        <div class="inv-label" id="inv-label">0</div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">Risk State <span class="tip" data-tip="NORMAL = quoting both sides. SKEWED = adjusting quotes to reduce inventory. ONE-SIDED = only one side. HALTED = VPIN too high, all quoting stopped.">?</span></div>
+      <div id="m-state-badge" style="margin-top:4px"><span class="state-pill sp-normal">● normal</span></div>
+      <div class="metric-hint" id="m-halts" style="margin-top:6px">vpin halts: 0</div>
+    </div>
+  </div>
+
+  <!-- LOB + right panel -->
+  <div class="row2">
+
+    <!-- LOB -->
+    <div class="card" style="display:flex;flex-direction:column">
+      <div class="card-title">Limit Order Book <span class="tip" data-tip="Live order book. Red = sellers (asks), Green = buyers (bids). Bar width = volume. Our own quotes appear below.">?</span></div>
+
+      <!-- Depth chart (canvas) -->
+      <div class="chart-wrap" style="height:130px;margin-bottom:10px">
+        <canvas id="depth-chart" role="img" aria-label="Order book depth chart showing cumulative bid and ask volume"></canvas>
+      </div>
+
+      <div id="lob-asks"></div>
+      <div class="mid-band">
+        <span class="metric-sm c-blue" id="lob-mid">mid 22,500.00</span>
+        <span style="font-size:11px;color:var(--text3)">spread <span id="lob-spread" class="c-amber" style="font-weight:600">—</span></span>
+        <span style="font-size:11px;color:var(--text3)">imb <span id="lob-imb" style="font-weight:500">—</span></span>
+      </div>
+      <div id="lob-bids"></div>
+
+      <!-- Spread visualiser -->
+      <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border)">
+        <div class="card-title" style="margin-bottom:6px">Quote spread visualiser <span class="tip" data-tip="Shows where our bid (green) and ask (red) quotes sit relative to the market mid. The orange gap is our spread — potential profit per round-trip.">?</span></div>
+        <div class="spread-vis">
+          <div class="sv-bid" id="sv-bid" style="width:42%">bid —</div>
+          <div class="sv-spread" id="sv-spread" style="width:16%">δ*=—</div>
+          <div class="sv-ask" id="sv-ask">ask —</div>
+        </div>
+        <div class="quote-card q-bid" id="q-bid">BUY at — × — lots</div>
+        <div class="quote-card q-ask" id="q-ask">SELL at — × — lots</div>
+      </div>
+    </div>
+
+    <!-- Right column -->
+    <div style="display:flex;flex-direction:column;gap:12px">
+
+      <!-- P&L Decomp -->
+      <div class="card">
+        <div class="card-title">P&amp;L Decomposition <span class="tip" data-tip="Where does our profit/loss come from? Three sources: (1) spread capture = money earned from bid-ask gap, (2) adverse selection = losses from informed traders, (3) inventory P&L = unrealised position value.">?</span></div>
+        <!-- Donut chart -->
+        <div style="display:grid;grid-template-columns:120px 1fr;gap:14px;align-items:center;margin-bottom:10px">
+          <div class="chart-wrap" style="height:110px"><canvas id="decomp-donut" role="img" aria-label="P&L decomposition donut chart"></canvas></div>
+          <div>
+            <div class="decomp-row">
+              <span class="decomp-lbl">Spread capture</span>
+              <div class="decomp-track"><div class="decomp-fill" id="db-sc" style="background:var(--green);width:0%"></div></div>
+              <span class="decomp-num c-green" id="dv-sc">₹0</span>
+            </div>
+            <div class="decomp-row">
+              <span class="decomp-lbl">Adverse select</span>
+              <div class="decomp-track"><div class="decomp-fill" id="db-as" style="background:var(--amber);width:0%"></div></div>
+              <span class="decomp-num c-amber" id="dv-as">₹0</span>
+            </div>
+            <div class="decomp-row">
+              <span class="decomp-lbl">Inventory P&amp;L</span>
+              <div class="decomp-track"><div class="decomp-fill" id="db-inv" style="background:var(--blue);width:0%"></div></div>
+              <span class="decomp-num c-blue" id="dv-inv">₹0</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- VPIN -->
+      <div class="card">
+        <div class="card-title">VPIN — Order Flow Toxicity <span class="tip" data-tip="0–0.35 = safe (normal market). 0.35–0.50 = caution (informed traders appearing). 0.50–0.65 = warning (widen spreads). Above 0.65 = HALT all quoting.">?</span></div>
+        <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:6px">
+          <span class="metric-lg" id="vpin-num" style="color:var(--green)">0.000</span>
+          <span class="state-pill sp-normal" id="vpin-pill" style="font-size:11px">safe</span>
+        </div>
+        <div class="vpin-outer"><div class="vpin-fill" id="vpin-fill" style="width:0%;background:var(--green)"></div></div>
+        <div class="vpin-markers"><span>0</span><span>0.35 caution</span><span>0.50 warn</span><span>0.65 halt</span><span>1</span></div>
+        <!-- VPIN sparkline -->
+        <div class="chart-wrap" style="height:50px;margin-top:8px">
+          <canvas id="vpin-chart" role="img" aria-label="VPIN history sparkline"></canvas>
+        </div>
+      </div>
+
+      <!-- RL Agent -->
+      <div class="card">
+        <div class="card-title">RL Agent Action Distribution <span class="tip" data-tip="The trained PPO neural network picks a gamma multiplier each tick. Highlighted row = current choice. Bars show how often each action has been selected. The agent learned γ×2.0 as dominant.">?</span></div>
+        <div id="rl-actions-el"></div>
+        <div style="font-size:12px;color:var(--text3);margin-top:6px;font-family:var(--mono)">current: <span id="rl-active-lbl" style="color:var(--amber);font-weight:600">γ×1.0</span> &nbsp;|&nbsp; episode reward: <span id="rl-reward" style="color:var(--blue)">—</span></div>
+      </div>
+
+      <!-- Regime -->
+      <div class="card-sm">
+        <div class="card-title">Volatility Regime <span class="tip" data-tip="LOW = calm market, tighten spreads. NORMAL = standard operation. HIGH = widen spread floor. SPIKE = 2× spread minimum enforced by risk controller.">?</span></div>
+        <div class="regime-row" id="regime-row">
+          <span class="regime-pill rp-LOW" id="rp-LOW">LOW</span>
+          <span class="regime-pill rp-NORMAL" id="rp-NORMAL">NORMAL</span>
+          <span class="regime-pill rp-HIGH" id="rp-HIGH">HIGH</span>
+          <span class="regime-pill rp-SPIKE" id="rp-SPIKE">SPIKE</span>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- A-S formula live panel -->
+  <div class="card">
+    <div class="card-title">Avellaneda-Stoikov — Live Formula Values <span class="tip" data-tip="These are the actual numbers the math is computing each tick. Watch reservation price shift as inventory changes, and spread widen/tighten with volatility.">?</span></div>
+    <div class="formula-grid">
+      <div class="formula-cell">
+        <div class="label">reservation price r</div>
+        <div class="val c-blue" id="f-r">—</div>
+        <div class="math">r = s − q·γ·σ²·τ</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:6px">mid shifted by inventory</div>
+      </div>
+      <div class="formula-cell">
+        <div class="label">optimal spread δ*</div>
+        <div class="val c-amber" id="f-delta">—</div>
+        <div class="math">γσ²τ + (2/γ)ln(1+γ/κ)</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:6px">inv risk + adverse selection</div>
+      </div>
+      <div class="formula-cell">
+        <div class="label">smoothed σ &amp; κ</div>
+        <div class="val c-teal" id="f-params">— / —</div>
+        <div class="math">EWM α=0.1</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:6px">vol / fill-rate (smoothed)</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Charts row -->
+  <div class="row2">
+    <div class="card">
+      <div class="card-title">P&amp;L Over Time <span class="tip" data-tip="Mark-to-market P&L every tick. Green fill = positive, red fill = negative. Watch inventory P&L swing as mid price moves against our position.">?</span></div>
+      <div class="chart-wrap" style="height:130px"><canvas id="pnl-chart" role="img" aria-label="P&L time series"></canvas></div>
+    </div>
+    <div class="card">
+      <div class="card-title">RL Episode Reward <span class="tip" data-tip="Reward the RL agent received per training episode. Reward is intentionally negative (penalties for inventory and VPIN). The upward trend shows learning. P&L itself is positive even when reward is negative.">?</span></div>
+      <div class="chart-wrap" style="height:130px"><canvas id="rl-chart" role="img" aria-label="RL reward per episode"></canvas></div>
+    </div>
+  </div>
+
+  <!-- Inventory history -->
+  <div class="card">
+    <div class="card-title">Inventory Over Time <span class="tip" data-tip="Tracks our net position (+ = long, - = short) over the session. The skew engine tries to keep this close to zero. Watch how it oscillates and how risk state changes when it gets large.">?</span></div>
+    <div class="chart-wrap" style="height:100px"><canvas id="inv-chart" role="img" aria-label="Inventory over time"></canvas></div>
+  </div>
+
+  <!-- Event log -->
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <div class="card-title" style="margin:0">Live Event Log</div>
+      <span style="font-size:11px;color:var(--text3);font-family:var(--mono)">most recent first ↑</span>
+    </div>
+    <div id="event-log" style="display:flex;flex-direction:column;gap:0;max-height:100px;overflow:hidden"></div>
+  </div>
+
+</main>
+</div>
+
+<!-- FOOTER -->
+<footer class="footer">
+  <span class="footer-l">For any queries, mail at <a href="mailto:cryptotesting999@gmail.com" style="color:var(--blue);text-decoration:none;border-bottom:1px solid rgba(26,92,160,.3)">cryptotesting999@gmail.com</a></span>
+</footer>
+</div>
+
+<script>
+'use strict';
+const $ = id => document.getElementById(id);
+const fmtRs = n => (n>=0?'+₹':'-₹')+Math.round(Math.abs(n)).toLocaleString('en-IN');
+const fmtP  = n => n.toFixed(2);
+const fmtM  = n => n.toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2});
+const clamp = (v,a,b) => Math.max(a,Math.min(b,v));
+
+/* ── Panel toggle ── */
+function tog(id, arrowId) {
+  const el=$(id), arr=$(arrowId);
+  const open = el.style.display!=='none';
+  el.style.display = open?'none':'block';
+  arr.classList.toggle('open',!open);
+  arr.textContent = open?'▸':'▾';
+}
+
+/* ── Chart instances ── */
+let pnlChart, rlChart, vpinChart, depthChart, decompDonut, invChart;
+let pnlData=[], rlData=[], vpinHistory=[], invHistory=[];
+
+const CGRID = 'rgba(0,0,0,0.05)';
+const CTICK = '#888880';
+
+function makeCharts() {
+  [pnlChart,rlChart,vpinChart,depthChart,decompDonut,invChart].forEach(c=>{if(c)c.destroy();});
+  pnlData=[]; rlData=[]; vpinHistory=[]; invHistory=[];
+
+  pnlChart = new Chart($('pnl-chart'),{type:'line',
+    data:{labels:[],datasets:[{label:'P&L',data:[],borderColor:'#1a7a4a',borderWidth:2,pointRadius:0,fill:'origin',backgroundColor:'rgba(26,122,74,0.08)',tension:0.4}]},
+    options:{responsive:true,maintainAspectRatio:false,animation:false,
+      plugins:{legend:{display:false}},
+      scales:{x:{display:false},y:{ticks:{font:{size:11},color:CTICK,callback:v=>fmtRs(v)},grid:{color:CGRID},border:{display:false}}}}
+  });
+
+  rlChart = new Chart($('rl-chart'),{type:'bar',
+    data:{labels:[],datasets:[{label:'Reward',data:[],backgroundColor:(ctx)=>ctx.raw>=ctx.chart.data.datasets[0].data[0]?'rgba(26,122,74,0.6)':'rgba(192,57,43,0.5)',borderRadius:3}]},
+    options:{responsive:true,maintainAspectRatio:false,animation:false,
+      plugins:{legend:{display:false}},
+      scales:{x:{ticks:{font:{size:10},color:CTICK},grid:{display:false},border:{display:false}},
+              y:{ticks:{font:{size:10},color:CTICK},grid:{color:CGRID},border:{display:false}}}}
+  });
+
+  vpinChart = new Chart($('vpin-chart'),{type:'line',
+    data:{labels:[],datasets:[{label:'VPIN',data:[],borderColor:'#c47d0e',borderWidth:1.5,pointRadius:0,fill:true,backgroundColor:'rgba(196,125,14,0.1)',tension:0.4},
+      {label:'Halt',data:[],borderColor:'rgba(192,57,43,0.5)',borderWidth:1,pointRadius:0,fill:false,borderDash:[4,3]}]},
+    options:{responsive:true,maintainAspectRatio:false,animation:false,
+      plugins:{legend:{display:false}},
+      scales:{x:{display:false},y:{min:0,max:1,ticks:{display:false},grid:{color:CGRID},border:{display:false}}}}
+  });
+
+  depthChart = new Chart($('depth-chart'),{type:'line',
+    data:{labels:[],datasets:[
+      {label:'Bids',data:[],borderColor:'rgba(26,122,74,0.8)',backgroundColor:'rgba(26,122,74,0.12)',borderWidth:1.5,pointRadius:0,fill:true,tension:0},
+      {label:'Asks',data:[],borderColor:'rgba(192,57,43,0.8)',backgroundColor:'rgba(192,57,43,0.12)',borderWidth:1.5,pointRadius:0,fill:true,tension:0}
+    ]},
+    options:{responsive:true,maintainAspectRatio:false,animation:false,
+      plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>`${ctx.dataset.label}: ${ctx.raw} lots`}}},
+      scales:{x:{ticks:{font:{size:9},color:CTICK,maxTicksLimit:8},grid:{color:CGRID},border:{display:false}},
+              y:{ticks:{font:{size:9},color:CTICK},grid:{color:CGRID},border:{display:false}}}}
+  });
+
+  decompDonut = new Chart($('decomp-donut'),{type:'doughnut',
+    data:{labels:['Spread Capture','Adverse Selection','Inventory P&L'],
+          datasets:[{data:[1,1,1],backgroundColor:['rgba(26,122,74,0.7)','rgba(196,125,14,0.7)','rgba(26,92,160,0.7)'],borderWidth:0,hoverOffset:4}]},
+    options:{responsive:true,maintainAspectRatio:false,animation:{duration:400},cutout:'65%',
+      plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>`${ctx.label}: ${Math.round(ctx.parsed*100/(ctx.dataset.data.reduce((a,b)=>a+b,0)||1))}%`}}}}
+  });
+
+  invChart = new Chart($('inv-chart'),{type:'bar',
+    data:{labels:[],datasets:[{label:'Inventory',data:[],backgroundColor:(ctx)=>ctx.raw>0?'rgba(26,122,74,0.5)':'rgba(192,57,43,0.5)',borderRadius:2}]},
+    options:{responsive:true,maintainAspectRatio:false,animation:false,
+      plugins:{legend:{display:false}},
+      scales:{x:{display:false},y:{ticks:{font:{size:10},color:CTICK},grid:{color:CGRID},border:{display:false}}}}
+  });
+}
+
+/* ── RL setup ── */
+const GAMMA_MULTS  = [0.5,0.75,1.0,1.25,1.5,2.0,0.0];
+const GAMMA_LABELS = ['γ×0.5','γ×0.75','γ×1.0','γ×1.25','γ×1.5','γ×2.0','pause'];
+const RL_BASE = [0.002,0.000,0.000,0.075,0.237,0.649,0.000];
+const RL_COLS = ['#1a7a4a','#3dba7e','#1a5ca0','#c47d0e','#d85a30','#c0392b','#888880'];
+
+function buildRLActions(probs, active) {
+  const el=$('rl-actions-el'); el.innerHTML='';
+  probs.forEach((p,i)=>{
+    const r=document.createElement('div');
+    r.className='rl-row'+(i===active?' active':'');
+    r.id='rlrow-'+i;
+    r.innerHTML=`<div class="rl-dot" style="background:${RL_COLS[i]}"></div>
+      <span class="rl-name">${GAMMA_LABELS[i]}</span>
+      <div class="rl-track"><div class="rl-fill" id="rlf-${i}" style="width:${(p*100).toFixed(1)}%;background:${RL_COLS[i]}"></div></div>
+      <span class="rl-pct" id="rlp-${i}">${(p*100).toFixed(1)}%</span>`;
+    el.appendChild(r);
+  });
+  $('rl-active-lbl').textContent = active===6?'pause':GAMMA_LABELS[active];
+}
+
+function updRLActions(probs, active) {
+  probs.forEach((p,i)=>{
+    const f=$('rlf-'+i),pp=$('rlp-'+i),rr=$('rlrow-'+i);
+    if(f)f.style.width=(p*100).toFixed(1)+'%';
+    if(pp)pp.textContent=(p*100).toFixed(1)+'%';
+    if(rr)rr.classList.toggle('active',i===active);
+  });
+  $('rl-active-lbl').textContent = active===6?'pause':GAMMA_LABELS[active];
+}
+
+/* ── LOB render ── */
+function renderLOB(bids, asks, mid, spread, imb) {
+  const maxV=Math.max(...bids.map(b=>b[1]),...asks.map(a=>a[1]),1);
+  $('lob-asks').innerHTML=''; $('lob-bids').innerHTML='';
+  [...asks].reverse().forEach(([p,v])=>{
+    const w=(v/maxV*100).toFixed(1);
+    $('lob-asks').insertAdjacentHTML('beforeend',
+      `<div class="lob-row"><span class="lob-price" style="color:var(--red)">${fmtP(p)}</span><div class="lob-bar-wrap"><div class="lob-bar" style="width:${w}%;background:rgba(192,57,43,0.55)"></div></div><span class="lob-vol">${v}</span></div>`);
+  });
+  bids.forEach(([p,v])=>{
+    const w=(v/maxV*100).toFixed(1);
+    $('lob-bids').insertAdjacentHTML('beforeend',
+      `<div class="lob-row"><span class="lob-price" style="color:var(--green)">${fmtP(p)}</span><div class="lob-bar-wrap"><div class="lob-bar" style="width:${w}%;background:rgba(26,122,74,0.55)"></div></div><span class="lob-vol">${v}</span></div>`);
+  });
+  $('lob-mid').textContent='mid '+fmtM(mid);
+  $('lob-spread').textContent=fmtP(spread);
+  const ic=imb>=0.1?'var(--green)':imb<=-0.1?'var(--red)':'var(--text2)';
+  $('lob-imb').textContent=(imb>=0?'+':'')+imb.toFixed(3);
+  $('lob-imb').style.color=ic;
+
+  // Update depth chart
+  const allPrices=[...bids.map(b=>b[0]),...asks.map(a=>a[0])].sort((a,b)=>a-b);
+  let cumBid=0,cumAsk=0;
+  const bidMap=Object.fromEntries(bids.map(b=>b));
+  const askMap=Object.fromEntries(asks.map(a=>a));
+  const bidLabels=[...bids].reverse().map(b=>b[0]);
+  const bidCum=[...bids].reverse().reduce((acc,b,i)=>{cumBid+=b[1];return[...acc,cumBid];},[]);
+  const askLabels=asks.map(a=>a[0]);
+  const askCum=asks.reduce((acc,a,i)=>{cumAsk+=a[1];return[...acc,cumAsk];},[]);
+
+  depthChart.data.labels=[...bidLabels,...askLabels];
+  depthChart.data.datasets[0].data=[...bidCum,...Array(askLabels.length).fill(null)];
+  depthChart.data.datasets[1].data=[...Array(bidLabels.length).fill(null),...askCum];
+  depthChart.update('none');
+}
+
+/* ── Log ── */
+function addLog(msg,type='info'){
+  const el=$('event-log');
+  const d=document.createElement('div');
+  d.className='log-line';
+  const cls={fill:'lf',halt:'lh',info:'li',warn:'lw'};
+  d.innerHTML=`<span class="${cls[type]||'li'}">[${type}]</span> ${msg}`;
+  el.prepend(d);
+  while(el.children.length>12)el.removeChild(el.lastChild);
+}
+
+/* ══ Simulation ══ */
+class Sim {
+  constructor(gamma,qty){
+    this.gamma=gamma;this.qty=qty;
+    this.mid=22500;this.t=0;this.T=600;
+    this.q=0;this.cash=0;this.sc=0;this.as_=0;
+    this.fills=0;this.trips=0;
+    this.vpinRaw=0;this.vpinBuy=0;this.vpinSell=0;this.vpinBkt=0;
+    this.BUCKET=500;this.halts=0;
+    this.sigmaSm=0.5;this.kappaSm=2.0;
+    this.regime='LOW';this.riskState='NORMAL';
+    this.rlProbs=[...RL_BASE];this.rlAction=5;
+    this.epRewards=[];this.epAcc=0;this.epStep=0;this.epLen=70;
+    this.prevPnl=0;this.prevMid=22500;
+    this.lastBidFill=0;this.lastAskFill=0;
+    this.bids=[];this.asks=[];
+    this._initBook();
+  }
+  _initBook(){for(let i=0;i<5;i++){this.bids.push([Math.round((22500-.5*(i+2))*2)/2,100+Math.floor(Math.random()*300)]);this.asks.push([Math.round((22500+.5*(i+2))*2)/2,100+Math.floor(Math.random()*300)]);}}
+  _ou(){const k=1.5,th=22500,sig=this.sigmaSm*20;const dW=(Math.random()+Math.random()-1)*Math.sqrt(.5)*1.41;this.mid+=k*(th-this.mid)*.5+sig*dW;this.mid=clamp(this.mid,21800,23200);}
+  _book(){
+    this._ou();
+    const sp=.5*(2+Math.random()*4);const bb=this.mid-sp/2,ba=this.mid+sp/2;
+    for(let i=0;i<5;i++){const d=(Math.random()-.5)*.3;
+      this.bids[i]=[Math.round((bb-i*.5+d)*2)/2,Math.max(10,Math.floor(this.bids[i][1]*.82+Math.random()*120))];
+      this.asks[i]=[Math.round((ba+i*.5+d)*2)/2,Math.max(10,Math.floor(this.asks[i][1]*.82+Math.random()*120))];
+    }
+  }
+  _asQuotes(){
+    const eff=this.gamma*GAMMA_MULTS[this.rlAction];
+    if(eff===0)return{skip:true};
+    const tau=Math.max(this.T-this.t,1),s2=this.sigmaSm*this.sigmaSm;
+    const r=this.mid-this.q*eff*s2*tau;
+    const delta=clamp(eff*s2*tau+(2/eff)*Math.log(1+eff/this.kappaSm),0.5,12);
+    const half=delta/2;
+    const bid=Math.round((r-half)*2)/2,ask=Math.round((r+half)*2)/2;
+    return{bid,ask,r,delta,skip:false};
+  }
+  _vpin(side,qty){
+    if(side==='bid')this.vpinBuy+=qty;else this.vpinSell+=qty;
+    this.vpinBkt+=qty;
+    if(this.vpinBkt>=this.BUCKET){this.vpinRaw=clamp(Math.abs(this.vpinBuy-this.vpinSell)/this.BUCKET,0,1);this.vpinBuy=0;this.vpinSell=0;this.vpinBkt=0;}
+  }
+  _risk(){const aq=Math.abs(this.q),qm=30;if(this.vpinRaw>=.65){this.riskState='HALTED';return;}if(aq>=qm*.8){this.riskState='ONE_SIDED';return;}if(aq>=qm*.5||this.vpinRaw>=.35){this.riskState='SKEWED';return;}this.riskState='NORMAL';}
+  _smooth(rs,rk){const a=.1;this.sigmaSm=Math.max(a*rs+(1-a)*this.sigmaSm,.05);this.kappaSm=Math.max(a*rk+(1-a)*this.kappaSm,.5);}
+  _rl(){
+    this.epStep++;
+    const vp=.3*Math.max(0,this.vpinRaw-.35),ip=.05*(this.q/30)**2;
+    const rew=(this.pnl-this.prevPnl)*5e-4-ip-vp;
+    this.prevPnl=this.pnl;this.epAcc+=rew;
+    if(this.epStep>=this.epLen){this.epRewards.push(parseFloat(this.epAcc.toFixed(3)));this.epAcc=0;this.epStep=0;this.epLen=60+Math.floor(Math.random()*40);}
+    const p=[...RL_BASE];
+    if(Math.abs(this.q)>20){p[5]+=.07;p[4]+=.04;p[2]-=.04;p[1]-=.03;p[0]-=.04;}
+    if(this.vpinRaw>.35){p[6]+=.1;p[0]-=.05;p[1]-=.05;}
+    const s=p.reduce((a,b)=>a+b,0);
+    this.rlProbs=p.map(b=>Math.max(0,b/s));
+    let r=Math.random(),cum=0;
+    for(let i=0;i<this.rlProbs.length;i++){cum+=this.rlProbs[i];if(r<cum){this.rlAction=i;break;}}
+  }
+  _regime(){const v=Math.abs(this.mid-this.prevMid);if(v>12)this.regime='SPIKE';else if(v>6)this.regime='HIGH';else if(v<2)this.regime='LOW';else this.regime='NORMAL';this.prevMid=this.mid;}
+  get pnl(){return this.cash+this.q*this.mid;}
+  get spread(){return this.asks[0]&&this.bids[0]?this.asks[0][0]-this.bids[0][0]:0;}
+  get imbalance(){const bv=this.bids.reduce((s,b)=>s+b[1],0),av=this.asks.reduce((s,a)=>s+a[1],0);return(bv-av)/(bv+av||1);}
+  step(){
+    this.t+=.5;if(this.t>this.T)return false;
+    this._book();this._regime();
+    this._smooth(Math.abs(this.mid-this.prevMid)+.01,Math.random()*3+.5);
+    this._rl();this._risk();
+    const q=this._asQuotes();
+    if(!q.skip&&this.riskState!=='HALTED'){
+      const pb=Math.min(Math.exp(-this.kappaSm*(this.mid-q.bid)),.9);
+      const pa=Math.min(Math.exp(-this.kappaSm*(q.ask-this.mid)),.9);
+      if(Math.random()<pb){this.cash-=q.bid*this.qty;this.q+=this.qty;this.fills++;this.as_+=(this.mid-q.bid)*this.qty;this._vpin('bid',this.qty);this.lastBidFill=q.bid;addLog(`BID fill @ ${fmtP(q.bid)} × ${this.qty}  inv=${this.q>0?'+':''}${this.q}`,'fill');}
+      if(Math.random()<pa){this.cash+=q.ask*this.qty;this.q-=this.qty;this.fills++;this.as_+=(q.ask-this.mid)*this.qty;if(this.lastBidFill>0){this.sc+=(q.ask-this.lastBidFill)*this.qty;this.trips++;this.lastBidFill=0;}this._vpin('sell',this.qty);this.lastAskFill=q.ask;addLog(`ASK fill @ ${fmtP(q.ask)} × ${this.qty}  inv=${this.q>0?'+':''}${this.q}`,'fill');}
+    }else if(this.riskState==='HALTED'){this.halts++;if(this.halts%30===1)addLog(`VPIN=${this.vpinRaw.toFixed(3)} — quoting halted`,'halt');}
+    if(Math.random()<.12)this._vpin(Math.random()<.5?'bid':'sell',Math.floor(Math.random()*60+10));
+    return true;
+  }
+}
+
+/* ── Update UI ── */
+let sim=null,running=false,interval=null,gamma=0.2,qty=10;
+function getSpeed(){return[null,900,550,300,150,70][parseInt($('sl-speed').value)];}
+
+function updateUI(){
+  const s=sim,pnl=s.pnl,mid=s.mid;
+  // Header
+  $('h-mid').textContent=fmtM(mid);$('h-gamma').textContent=gamma.toFixed(2);
+  $('h-pnl').textContent=pnl===0?'₹0':fmtRs(pnl);$('h-pnl').style.color=pnl>0?'var(--green)':pnl<0?'var(--red)':'var(--text2)';
+  // KPIs
+  $('m-mid').textContent=fmtM(mid);
+  const chg=mid-s.prevMid;$('m-mid-chg').textContent=(chg>=0?'+':'')+chg.toFixed(2)+' this tick';$('m-mid-chg').className='metric-hint '+(chg>=0?'c-green':'c-red');
+  $('m-pnl').textContent=pnl===0?'₹0':fmtRs(pnl);$('m-pnl').style.color=pnl>0?'var(--green)':pnl<0?'var(--red)':'var(--text2)';
+  $('m-fills').textContent=`fills: ${s.fills}  |  trips: ${s.trips}`;
+  $('m-inv').textContent=(s.q>=0?'+':'')+s.q;$('m-inv').style.color=s.q===0?'var(--text2)':s.q>0?'var(--green)':'var(--red)';
+  // Inventory bar
+  const qmax=30,qFrac=clamp(Math.abs(s.q)/qmax,0,1);
+  const ibar=$('inv-bar');
+  if(s.q>=0){ibar.style.left='50%';ibar.style.width=(qFrac*50)+'%';ibar.style.background='rgba(26,122,74,0.6)';}
+  else{ibar.style.width=(qFrac*50)+'%';ibar.style.left=(50-qFrac*50)+'%';ibar.style.background='rgba(192,57,43,0.6)';}
+  $('inv-label').textContent=(s.q>=0?'+':'')+s.q;
+  // State
+  const sc={NORMAL:'sp-normal',SKEWED:'sp-skewed',ONE_SIDED:'sp-one',HALTED:'sp-halted'};
+  const sl={NORMAL:'● normal',SKEWED:'▲ skewing',ONE_SIDED:'◆ one-sided',HALTED:'✖ halted'};
+  $('m-state-badge').innerHTML=`<span class="state-pill ${sc[s.riskState]}">${sl[s.riskState]}</span>`;
+  $('m-halts').textContent='vpin halts: '+s.halts;
+  // LOB
+  renderLOB(s.bids,s.asks,mid,s.spread,s.imbalance);
+  // Spread vis
+  const q=s._asQuotes();
+  if(!q.skip&&s.riskState!=='HALTED'){
+    const total=Math.abs(q.bid)+Math.abs(q.delta)+Math.abs(q.ask);
+    const bw=42,sw=16;
+    $('sv-bid').textContent=fmtP(q.bid);$('sv-bid').style.width=bw+'%';
+    $('sv-spread').textContent='δ*='+fmtP(q.delta);$('sv-spread').style.width=sw+'%';
+    $('sv-ask').textContent=fmtP(q.ask);
+    $('q-bid').className='quote-card q-bid';$('q-bid').textContent=`BUY at ${fmtP(q.bid)} × ${qty} lots   (r=${fmtP(q.r)})`;
+    $('q-ask').className='quote-card q-ask';$('q-ask').textContent=`SELL at ${fmtP(q.ask)} × ${qty} lots  (δ*=${fmtP(q.delta)})`;
+  }else{
+    $('q-bid').className='quote-card q-skip';$('q-bid').textContent=s.riskState==='HALTED'?'⚠ Quoting HALTED — VPIN above 0.65':'— Paused by RL agent —';
+    $('q-ask').className='quote-card q-skip';$('q-ask').textContent='Waiting for safer conditions…';
+  }
+  // Decomp
+  const sc2=Math.max(Math.abs(s.sc),1),as2=Math.max(Math.abs(s.as_),1),inv2=Math.max(Math.abs(s.q*mid),1),total=sc2+as2+inv2;
+  $('db-sc').style.width=(sc2/total*100).toFixed(1)+'%';$('dv-sc').textContent=fmtRs(s.sc);$('dv-sc').style.color=s.sc>=0?'var(--green)':'var(--red)';
+  $('db-as').style.width=(as2/total*100).toFixed(1)+'%';$('dv-as').textContent=fmtRs(s.as_);$('dv-as').style.color=s.as_>=0?'var(--green)':'var(--amber)';
+  $('db-inv').style.width=(inv2/total*100).toFixed(1)+'%';$('dv-inv').textContent=fmtRs(s.q*mid);$('dv-inv').style.color=s.q*mid>=0?'var(--blue)':'var(--red)';
+  // Decomp donut
+  decompDonut.data.datasets[0].data=[sc2,as2,inv2];decompDonut.update('none');
+  // VPIN
+  const vp=s.vpinRaw;
+  const vpc=vp>=.65?'var(--red)':vp>=.5?'#c0392b':vp>=.35?'var(--amber)':'var(--green)';
+  $('vpin-num').textContent=vp.toFixed(3);$('vpin-num').style.color=vpc;
+  $('vpin-fill').style.width=(vp*100).toFixed(1)+'%';$('vpin-fill').style.background=vpc;
+  const vpl=vp>=.65?'sp-halted':vp>=.5?'sp-one':vp>=.35?'sp-skewed':'sp-normal';
+  const vpt=vp>=.65?'HALTED':vp>=.5?'warning':vp>=.35?'caution':'safe';
+  $('vpin-pill').className='state-pill '+vpl;$('vpin-pill').textContent=vpt;
+  // VPIN sparkline
+  vpinHistory.push(vp);if(vpinHistory.length>80)vpinHistory.shift();
+  vpinChart.data.labels=vpinHistory.map((_,i)=>i);
+  vpinChart.data.datasets[0].data=vpinHistory;
+  vpinChart.data.datasets[1].data=vpinHistory.map(()=>0.65);
+  vpinChart.update('none');
+  // RL
+  updRLActions(s.rlProbs,s.rlAction);
+  if(s.epRewards.length>0)$('rl-reward').textContent=s.epRewards[s.epRewards.length-1].toFixed(3);
+  // Regime
+  ['LOW','NORMAL','HIGH','SPIKE'].forEach(r=>{const e=$('rp-'+r);if(e)e.classList.toggle('active',r===s.regime);});
+  // Formula
+  if(q&&!q.skip){$('f-r').textContent=fmtP(q.r);$('f-delta').textContent=fmtP(q.delta);}
+  $('f-params').textContent=`σ ${s.sigmaSm.toFixed(4)}  /  κ ${s.kappaSm.toFixed(2)}`;
+  // PnL chart
+  pnlData.push(Math.round(pnl));if(pnlData.length>200)pnlData.shift();
+  pnlChart.data.labels=pnlData.map((_,i)=>i);pnlChart.data.datasets[0].data=pnlData;
+  pnlChart.data.datasets[0].borderColor=pnl>=0?'#1a7a4a':'#c0392b';
+  pnlChart.data.datasets[0].backgroundColor=pnl>=0?'rgba(26,122,74,0.08)':'rgba(192,57,43,0.08)';
+  pnlChart.update('none');
+  // RL chart
+  if(s.epRewards.length>rlData.length){while(rlData.length<s.epRewards.length)rlData.push(s.epRewards[rlData.length]);rlChart.data.labels=rlData.map((_,i)=>'ep'+(i+1));rlChart.data.datasets[0].data=rlData;rlChart.update('none');}
+  // Inv chart
+  invHistory.push(s.q);if(invHistory.length>150)invHistory.shift();
+  invChart.data.labels=invHistory.map((_,i)=>i);invChart.data.datasets[0].data=invHistory;
+  invChart.update('none');
+}
+
+/* ── Run/pause/reset ── */
+function startSim(){
+  if(interval)clearInterval(interval);
+  running=true;if(!sim)sim=new Sim(gamma,qty);
+  $('status-dot').className='dot-run on';$('status-label').textContent='running';
+  $('btn-run').textContent='⏸ Pause';
+  interval=setInterval(()=>{if(!running)return;const a=sim.step();updateUI();if(!a){clearInterval(interval);running=false;$('status-dot').className='dot-run';$('status-label').textContent='complete';$('btn-run').textContent='▶ Run Simulation';addLog('Session ended — t=600s','info');}},getSpeed());
+}
+function pauseSim(){running=false;clearInterval(interval);$('status-dot').className='dot-run';$('status-label').textContent='paused';$('btn-run').textContent='▶ Run Simulation';}
+function resetAll(){
+  pauseSim();sim=null;makeCharts();buildRLActions(RL_BASE,5);
+  $('status-label').textContent='idle';$('btn-run').textContent='▶ Run Simulation';
+  $('event-log').innerHTML='';
+  $('m-pnl').textContent='₹0';$('m-pnl').style.color='var(--text2)';
+  $('m-inv').textContent='0';$('m-inv').style.color='var(--text2)';
+  $('m-state-badge').innerHTML='<span class="state-pill sp-normal">● normal</span>';
+  $('vpin-num').textContent='0.000';$('vpin-fill').style.width='0%';
+  $('h-pnl').textContent='₹0';$('h-pnl').style.color='var(--text2)';
+  $('inv-bar').style.width='0%';
+  ['LOW','NORMAL','HIGH','SPIKE'].forEach(r=>{const e=$('rp-'+r);if(e)e.classList.toggle('active',r==='LOW');});
+  renderLOB(Array.from({length:5},(_,i)=>[22500-.5*(i+2),150+i*50]),Array.from({length:5},(_,i)=>[22500+.5*(i+2),150+i*50]),22500,2,0);
+  addLog('Engine reset — press Run to start','info');
+}
+
+$('btn-run').addEventListener('click',()=>{if(running)pauseSim();else startSim();});
+$('btn-reset').addEventListener('click',resetAll);
+$('sl-gamma').addEventListener('input',function(){gamma=parseInt(this.value)*.1;$('vl-gamma').textContent=gamma.toFixed(2);$('h-gamma').textContent=gamma.toFixed(2);if(sim)sim.gamma=gamma;});
+$('sl-speed').addEventListener('input',function(){$('vl-speed').textContent=this.value+'×';if(running){clearInterval(interval);interval=setInterval(()=>{if(!running)return;const a=sim.step();updateUI();if(!a){clearInterval(interval);running=false;}},getSpeed());}});
+$('sl-qty').addEventListener('input',function(){qty=parseInt(this.value);$('vl-qty').textContent=qty;if(sim)sim.qty=qty;});
+
+/* ── Init ── */
+makeCharts();buildRLActions(RL_BASE,5);
+['LOW','NORMAL','HIGH','SPIKE'].forEach(r=>{const e=$('rp-'+r);if(e)e.classList.toggle('active',r==='LOW');});
+renderLOB(Array.from({length:5},(_,i)=>[22500-.5*(i+2),150+i*50]),Array.from({length:5},(_,i)=>[22500+.5*(i+2),150+i*50]),22500,2,0);
+addLog('Engine ready — press ▶ Run to start','info');
+addLog('Tip: slow the speed to watch individual fills happen in real time','info');
+addLog('Tip: drag γ slider to see how quote width changes live','info');
+</script>
+</body>
+</html>
